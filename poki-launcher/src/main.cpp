@@ -1,7 +1,8 @@
 #include "Bindings.h"
 
 #include <QtCore/QFile>
-#include <QtGui/QGuiApplication>
+// #include <QtGui/QGuiApplication>
+#include <QApplication>
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/qqml.h>
 
@@ -12,7 +13,7 @@ extern "C" {
 int main_cpp(const char* appPath) {
     int argc = 1;
     char* argv[1] = { (char*)appPath };
-    QGuiApplication app(argc, argv);
+    QApplication app(argc, argv);
     qmlRegisterType<AppsModel>("PokiLauncher", 1, 0, "AppsModel");
 
     QQmlApplicationEngine engine;

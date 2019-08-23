@@ -8,5 +8,6 @@ fn main() {
         .cpp("src/main.cpp")
         .module(QtModule::Gui)
         .module(QtModule::Qml)
+        .module(QtModule::Widgets)
         .compile("qt_quick_cargo");
 }

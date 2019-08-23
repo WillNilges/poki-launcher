@@ -1,12 +1,7 @@
 import QtQuick 2.13
-import PokiLauncher 1.0
 import QtQuick.Layouts 1.13
 
 Rectangle {
-    AppsModel {
-        id: apps_model
-    }
-
     color: "#282a36"
 
 	function run() {

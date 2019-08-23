@@ -8,6 +8,9 @@ edition = "2018"
 [dependencies]
 libc = "0.2"
 gtk = "0.7"
+dbus = "0.6"
+failure = "0.1"
+structopt = "0.2"
 lib-poki-launcher = { path = "../launcher" }
 
 [build-dependencies]

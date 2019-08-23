@@ -1,7 +1,10 @@
 use super::interface::*;
+use crate::dbus_server::*;
 use gtk::{Application, IconLookupFlags, IconTheme, IconThemeExt};
 use lib_poki_launcher::prelude::*;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 const DB_PATH: &'static str = "apps.db";
 const MAX_APPS_SHOWN: usize = 5;
@@ -12,10 +15,12 @@ pub struct AppsModel {
     list: Vec<App>,
     apps: AppsDB,
     selected_item: String,
+    window_visible: Arc<AtomicBool>,
 }
 
 impl AppsModelTrait for AppsModel {
-    fn new(emit: AppsModelEmitter, model: AppsModelList) -> AppsModel {
+    fn new(mut emit: AppsModelEmitter, model: AppsModelList) -> AppsModel {
+        println!("Test");
         let _application =
             Application::new(Some("info.bengoldberg.poki_launcher"), Default::default())
                 .expect("failed to initialize GTK application");
@@ -27,6 +32,11 @@ impl AppsModelTrait for AppsModel {
             apps.save(&DB_PATH).expect("Faile to write db to disk");
             apps
         };
+        let window_visible = Arc::new(AtomicBool::new(true));
+
+        let other_emit = Mutex::new(emit.clone());
+        let other_visible = window_visible.clone();
+        start_dbus_server(other_emit, other_visible).unwrap();
 
         AppsModel {
             emit,
@@ -34,6 +44,7 @@ impl AppsModelTrait for AppsModel {
             list: Vec::new(),
             apps,
             selected_item: String::new(),
+            window_visible,
         }
     }
 
@@ -51,6 +62,14 @@ impl AppsModelTrait for AppsModel {
 
     fn set_selected(&mut self, value: String) {
         self.selected_item = value;
+    }
+
+    fn visible(&self) -> bool {
+        self.window_visible.load(Ordering::Relaxed)
+    }
+
+    fn set_visible(&mut self, value: bool) {
+        self.window_visible.store(value, Ordering::Relaxed);
     }
 
     fn name(&self, index: usize) -> &str {
