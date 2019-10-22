@@ -1,0 +1,12 @@
+[package]
+name = "linux-icon-theme"
+version = "0.1.0"
+authors = ["zethra <jediben97@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rust-ini = "0.13"
+failure = "0.1"
+shellexpand = "1.0"

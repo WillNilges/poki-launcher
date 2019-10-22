@@ -5,4 +5,5 @@ members = [
 	"poki-launcher",
 	"poki-launcher-notifier",
 	"poki-launcher-x11",
+	"linux-icon-theme",
 ]
