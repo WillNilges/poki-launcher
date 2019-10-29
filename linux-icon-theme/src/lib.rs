@@ -4,6 +4,7 @@ use failure::{Error, Fail};
 use ini::Ini;
 use std::collections::HashMap;
 use std::fs::read_dir;
+use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -61,9 +62,10 @@ impl IconCache {
                 Ok(dir) => {
                     for entry in dir {
                         let entry = entry?;
+                        let name = entry.file_name().to_string_lossy().into_owned();
                         match IconTheme::from_path(entry.path()) {
                             Ok((icon_theme, errs)) => {
-                                themes.insert(icon_theme.name.clone(), icon_theme);
+                                themes.insert(name, icon_theme);
                                 errors.extend(errs);
                             }
                             Err(e) => errors.push(e),
@@ -78,40 +80,61 @@ impl IconCache {
         Ok((IconCache { themes }, errors))
     }
 
-    pub fn get_icon(&self, theme_name: &str, icon_name: &str, size: u32) -> Option<PathBuf> {
+    pub fn get_icon(
+        &self,
+        theme_name: &str,
+        icon_name: &str,
+        scale: u32,
+        size: u32,
+    ) -> Option<PathBuf> {
         let theme = self.themes.get(theme_name)?;
-        for directory in &theme.directories {
-            for (name, ext) in &directory.icons {
-                if name == icon_name {
-                    let mut path = directory.path.clone();
-                    path.push(format!("{}.{}", name, ext));
-                    return Some(path);
+        match theme.icons.get(&(icon_name.to_owned(), scale)) {
+            Some(icons) => {
+                println!("{}", icons.len());
+                for icon in icons {
+                    if icon.size_range.contains(&size) {
+                        return Some(icon.path.clone());
+                    }
                 }
+                self.get_fallback(&theme, theme_name, icon_name, scale, size)
             }
+            None => self.get_fallback(&theme, theme_name, icon_name, scale, size),
         }
+    }
+
+    fn get_fallback(
+        &self,
+        theme: &IconTheme,
+        theme_name: &str,
+        icon_name: &str,
+        scale: u32,
+        size: u32,
+    ) -> Option<PathBuf> {
         if theme_name == DEFAULT_THEME {
             None
         } else {
             for parent in &theme.inherits {
-                if let Some(path) = self.get_icon(parent, icon_name, size) {
+                if let Some(path) = self.get_icon(parent, icon_name, scale, size) {
                     return Some(path);
                 }
             }
-            self.get_icon(DEFAULT_THEME, icon_name, size)
+            self.get_icon(DEFAULT_THEME, icon_name, scale, size)
         }
     }
 }
 
+type IconMap = HashMap<(String, u32), Vec<Icon>>;
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct IconTheme {
-    pub name: String,
-    pub display_name: String,
-    pub comment: String,
     inherits: Vec<String>,
-    directories: Vec<Directory>,
-    scaled_directories: Vec<Directory>,
-    pub hidden: bool,
-    pub example: Option<String>,
+    icons: IconMap,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Icon {
+    pub path: PathBuf,
+    pub size_range: RangeInclusive<u32>,
 }
 
 impl IconTheme {
@@ -125,32 +148,10 @@ impl IconTheme {
                 path: path_str.clone(),
             },
         )?;
-        let name = path
-            .as_ref()
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-        let display_name = theme_section
-            .get("Name")
-            .ok_or(CreateError::MissingProp {
-                path: path_str.clone(),
-                name: "Name",
-            })?
-            .clone();
-        let comment = theme_section
-            .get("Comment")
-            .ok_or(CreateError::MissingProp {
-                path: path_str.clone(),
-                name: "Comment",
-            })?
-            .clone();
         let inherits = match theme_section.get("Inherits") {
             Some(value) => value.split(",").map(|s| s.to_owned()).collect(),
             None => Vec::new(),
         };
-        let example = theme_section.get("Hidden").map(|s| s.to_owned());
-        let hidden = parse_optional_prop("Hidden", path_str.clone(), theme_section, false)?;
         let (directories, errors): (Vec<_>, Vec<_>) = theme_section
             .get("Directories")
             .ok_or(CreateError::MissingProp {
@@ -161,7 +162,7 @@ impl IconTheme {
             .map(|name| Directory::from(&name, path.as_ref(), &index_file))
             .partition(Result::is_ok);
         let mut errors: Vec<Error> = errors.into_iter().map(Result::unwrap_err).collect();
-        let directories = directories
+        let mut directories: Vec<Directory> = directories
             .into_iter()
             .map(|item| {
                 let (directory, errs) = item.unwrap();
@@ -176,29 +177,44 @@ impl IconTheme {
                 .partition(Result::is_ok),
             None => (Vec::new(), Vec::new()),
         };
-        let scaled_directories = scaled_directories
-            .into_iter()
-            .map(|item| {
-                let (directory, errs) = item.unwrap();
-                errors.extend(errs);
-                directory
-            })
-            .collect();
+        directories.extend::<Vec<Directory>>(
+            scaled_directories
+                .into_iter()
+                .map(|item| {
+                    let (directory, errs) = item.unwrap();
+                    errors.extend(errs);
+                    directory
+                })
+                .collect(),
+        );
         errors.extend::<Vec<Error>>(errs.into_iter().map(Result::unwrap_err).collect());
 
-        Ok((
-            IconTheme {
-                name,
-                display_name,
-                comment,
-                inherits,
-                directories,
-                scaled_directories,
-                hidden,
-                example,
-            },
-            errors,
-        ))
+        let mut icons: IconMap = HashMap::new();
+        for directory in directories {
+            for (icon_name, icon_path) in &directory.icons {
+                let mut path = directory.path.clone();
+                path.push(&icon_path);
+                let icon = match &directory.type_ {
+                    DirectoryType::Fixed | DirectoryType::Scalable => Icon {
+                        path,
+                        size_range: directory.min_size..=directory.max_size,
+                    },
+                    DirectoryType::Threshold => Icon {
+                        path,
+                        size_range: directory.min_size - directory.threshold
+                            ..=directory.max_size + directory.threshold,
+                    },
+                };
+                let key = (icon_name.clone(), directory.scale);
+                if icons.contains_key(&key) {
+                    icons.get_mut(&key).unwrap().push(icon);
+                } else {
+                    icons.insert(key, vec![icon]);
+                }
+            }
+        }
+
+        Ok((IconTheme { inherits, icons }, errors))
     }
 }
 
@@ -209,7 +225,6 @@ pub struct Directory {
     size: u32,
     // Spec says this is an int (should investigate if some things use fractional scaling)
     scale: u32,
-    context: Option<String>,
     type_: DirectoryType,
     max_size: u32,
     min_size: u32,
@@ -255,7 +270,6 @@ impl Directory {
             &dir_section,
             DirectoryType::Threshold,
         )?;
-        let context = dir_section.get("Context").map(|s| s.to_owned());
         let mut icons = Vec::new();
         let mut errors = Vec::new();
         for entry in read_dir(&path)? {
@@ -269,12 +283,7 @@ impl Directory {
                                 .ok_or(CreateError::MissingExt)?
                                 .to_string_lossy()
                                 .into_owned(),
-                            entry
-                                .path()
-                                .extension()
-                                .ok_or(CreateError::MissingExt)?
-                                .to_string_lossy()
-                                .into_owned(),
+                            entry.path().to_string_lossy().into_owned(),
                         ))
                     }
                 }
@@ -288,7 +297,6 @@ impl Directory {
                 icons,
                 size,
                 scale,
-                context,
                 type_,
                 max_size,
                 min_size,
@@ -306,7 +314,6 @@ impl Default for Directory {
             icons: Default::default(),
             size: Default::default(),
             scale: 1,
-            context: None,
             type_: DirectoryType::Threshold,
             max_size: Default::default(),
             min_size: Default::default(),

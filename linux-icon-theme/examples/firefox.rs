@@ -5,6 +5,6 @@ fn main() {
     println!("Creation done");
     // println!("{:#?}", icon_cache);
     // eprintln!("Errors: {:#?}", errors);
-    let icon = icon_cache.get_icon("hicolor", "firefox", 128);
+    let icon = icon_cache.get_icon("Papirus", "firefox", 1, 128);
     println!("{:?}", icon);
 }
